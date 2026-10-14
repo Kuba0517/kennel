@@ -1,6 +1,8 @@
 use anyhow::{bail, Context, Result};
 use serde::Deserialize;
+use std::collections::hash_map::DefaultHasher;
 use std::collections::HashSet;
+use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
 
 const BUILTIN_PROFILES: &[(&str, &str)] = &[
@@ -153,7 +155,7 @@ pub fn env_allowed(name: &str, patterns: &[String]) -> bool {
     })
 }
 
-pub fn resolve(profile_name: &str) -> Result<Policy> {
+pub fn resolve(profile_name: &str, trust_project: bool) -> Result<Policy> {
     let home = home_dir()?;
     let mut policy = Policy {
         cwd_rw: true,
@@ -165,6 +167,7 @@ pub fn resolve(profile_name: &str) -> Result<Policy> {
     let project_file = Path::new(".kennel.toml");
     if project_file.is_file() {
         let source = std::fs::read_to_string(project_file).context("reading .kennel.toml")?;
+        check_trusted(&source, &home, trust_project)?;
         let parsed: ProfileFile = toml::from_str(&source).context("parsing .kennel.toml")?;
         if parsed.extends.is_some() {
             bail!(".kennel.toml must not use 'extends'; it is always merged on top");
@@ -174,4 +177,32 @@ pub fn resolve(profile_name: &str) -> Result<Policy> {
     }
 
     Ok(policy)
+}
+
+// A repo can loosen its own sandbox through .kennel.toml, so the exact contents
+// must be approved once. The approved copy lives outside the sandbox's reach.
+fn check_trusted(source: &str, home: &Path, trust: bool) -> Result<()> {
+    let cwd = std::env::current_dir().context("reading current directory")?;
+    let stored = home
+        .join(".config/kennel/trusted")
+        .join(format!("{}.toml", path_id(&cwd)));
+    if std::fs::read_to_string(&stored).is_ok_and(|s| s == source) {
+        return Ok(());
+    }
+    if trust {
+        std::fs::create_dir_all(stored.parent().unwrap())?;
+        std::fs::write(&stored, source).with_context(|| format!("writing {}", stored.display()))?;
+        return Ok(());
+    }
+    bail!(
+        "{} has a .kennel.toml that is new or changed since you approved it:\n\n{source}\n\
+         Review it, then run again with --trust.",
+        cwd.display()
+    );
+}
+
+pub fn path_id(path: &Path) -> String {
+    let mut hasher = DefaultHasher::new();
+    path.hash(&mut hasher);
+    format!("{:016x}", hasher.finish())
 }

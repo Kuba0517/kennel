@@ -3,8 +3,6 @@ mod sandbox;
 
 use anyhow::{bail, Context, Result};
 use clap::Parser;
-use std::collections::hash_map::DefaultHasher;
-use std::hash::{Hash, Hasher};
 use std::os::unix::fs::DirBuilderExt;
 use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
@@ -43,6 +41,10 @@ struct Args {
     /// Do not grant read-write on the current directory.
     #[arg(long)]
     no_cwd: bool,
+
+    /// Approve the current .kennel.toml in this project.
+    #[arg(long)]
+    trust: bool,
 
     /// Print the effective policy and exit without running anything.
     #[arg(long)]
@@ -96,7 +98,7 @@ fn main() -> Result<()> {
         }
     };
 
-    let mut pol = policy::resolve(&profile_name)?;
+    let mut pol = policy::resolve(&profile_name, args.trust)?;
 
     pol.read.extend(args.read_only.iter().cloned());
     pol.read_write.extend(args.read_write.iter().cloned());
@@ -161,11 +163,7 @@ fn main() -> Result<()> {
 
 // /tmp is shared with everything else on the machine, so each project gets its own.
 fn private_tmp(home: &Path, cwd: &Path) -> Result<PathBuf> {
-    let mut hasher = DefaultHasher::new();
-    cwd.hash(&mut hasher);
-    let dir = home
-        .join(".cache/kennel/tmp")
-        .join(format!("{:016x}", hasher.finish()));
+    let dir = home.join(".cache/kennel/tmp").join(policy::path_id(cwd));
     std::fs::DirBuilder::new()
         .recursive(true)
         .mode(0o700)
