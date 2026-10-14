@@ -1,3 +1,4 @@
+mod gitguard;
 mod policy;
 mod sandbox;
 mod seccomp;
@@ -143,6 +144,7 @@ fn main() -> Result<()> {
         return Ok(());
     }
 
+    let git = gitguard::snapshot(&cwd);
     let pid = supervisor::fork()?;
     if pid == 0 {
         let err = run_agent(&args, &pol, &tmp);
@@ -150,6 +152,27 @@ fn main() -> Result<()> {
         unsafe { libc::_exit(126) };
     }
     let code = supervisor::wait(pid)?;
+    if let Some(git) = git {
+        let stamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+        let quarantine = home
+            .join(".cache/kennel/rejected")
+            .join(policy::path_id(&cwd))
+            .join(stamp.to_string());
+        let changes = gitguard::check_and_restore(&git, &quarantine);
+        if !changes.is_empty() {
+            eprintln!("kennel: undid git changes that would run outside the sandbox:");
+            for c in &changes {
+                eprintln!("  {c}");
+            }
+            eprintln!(
+                "kennel: the agent's versions are in {}",
+                quarantine.display()
+            );
+        }
+    }
     std::process::exit(code);
 }
 
