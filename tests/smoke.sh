@@ -50,6 +50,11 @@ check "blocks unix sockets"              nonzero "$KENNEL" -- python3 -c 'import
 check "allows socketpair"                0       "$KENNEL" -- python3 -c 'import socket; socket.socketpair()'
 check "blocks io_uring"                  nonzero "$KENNEL" -- python3 -c 'import ctypes; b=ctypes.create_string_buffer(120); exit(ctypes.CDLL(None).syscall(425, 1, b) < 0)'
 check "--allow-unix allows unix sockets" 0       "$KENNEL" --allow-unix -- python3 -c 'import socket; socket.socket(socket.AF_UNIX)'
+check "claude allows connectors"         0       bash -c "\"$KENNEL\" --dry-run claude | grep -q '^    mcp-proxy.anthropic.com'"
+check "--strict blocks connectors"       nonzero bash -c "\"$KENNEL\" --strict --dry-run claude | grep -q '^    mcp-proxy.anthropic.com'"
+mkdir -p h/.config/kennel/profiles && printf '[net]\nallow_domains = ["extra.example"]\n' > h/.config/kennel/profiles/claude.toml
+check "user profile adds to built-in"    0       bash -c "HOME=$WORK/h \"$KENNEL\" --dry-run claude | grep -q extra.example && HOME=$WORK/h \"$KENNEL\" --dry-run claude | grep -q api.anthropic.com"
+rm -r h
 printf '[fs]\nread_write = ["~"]\n' > .kennel.toml
 check "refuses unapproved .kennel.toml"  nonzero "$KENNEL" -- true
 rm .kennel.toml
