@@ -12,15 +12,18 @@ A coding agent runs as your user, so it can read everything you can read. That i
 
 The agent's own permission prompts don't help much here. They run inside the same process you are trying to limit.
 
-Landlock is a Linux kernel feature that lets an unprivileged process restrict its own file and network access. kennel builds a Landlock ruleset from a profile, applies it to itself, and then execs the agent. After that the kernel returns `EACCES` for any path that isn't on the allow-list. TCP is limited to the allowed ports (443 and 80 by default). The rules carry over to every child process, so shells and build tools the agent starts are restricted too, and a process can't remove them.
+Landlock is a Linux kernel feature that lets an unprivileged process restrict its own file and network access. kennel forks, builds a Landlock ruleset from a profile in the child, and execs the agent there. After that the kernel returns `EACCES` for any path that isn't on the allow-list. The rules carry over to every child process, so shells and build tools the agent starts are restricted too, and a process can't remove them.
 
-Before the exec, kennel also:
+The agent only reaches the network through a proxy that kennel runs outside the sandbox. The proxy connects to the domains in the profile and nothing else. A seccomp filter sends every `connect()` to kennel, which only lets it reach the proxy, and the agent can't create UDP sockets, so DNS doesn't work either.
+
+kennel also:
 
 - drops every environment variable that isn't on the profile's list, so tokens in your shell don't reach the agent
 - closes inherited file descriptors
 - blocks signals and abstract unix sockets to processes outside the sandbox
 - points `TMPDIR` at a private directory per project and denies `/tmp`
 - blocks creating unix sockets with a seccomp filter, so the agent can't reach the ssh-agent, the D-Bus session bus or `/var/run/docker.sock`. `socketpair()` still works. Pass `--allow-unix` (or set `allow_unix = true` under `[net]`) for agents that need local sockets.
+- checks `.git/hooks` and `.git/config` when the agent exits. A new or changed hook, or a config key that runs a program or changes where you push (`core.hooksPath`, `core.fsmonitor`, `alias.*`, `remote.*.url` and similar), is undone and the agent's version is moved to `~/.cache/kennel/rejected/`.
 
 With that in place I run agents in full-auto mode:
 
@@ -34,7 +37,7 @@ kennel claude --dangerously-skip-permissions
 cargo install --path .
 ```
 
-You need Linux 5.13+ with Landlock enabled. TCP rules need 6.7+. Check with `grep landlock /sys/kernel/security/lsm`.
+You need Linux 6.12+ with Landlock enabled. Check with `grep landlock /sys/kernel/security/lsm`. Older kernels get partial enforcement and a warning.
 
 ## Usage
 
@@ -47,10 +50,15 @@ kennel --dry-run claude            # print the policy and exit
 kennel -v claude                   # log every granted path
 
 kennel --ro ~/datasets --rw ~/scratch claude   # extra paths
-kennel --no-network -- python untrusted.py     # no TCP at all
+kennel --allow-domain pypi.org claude          # let the proxy reach another domain
 kennel --allow-port 5432 claude                # let the agent reach local postgres
+kennel --allow-bind 3000 claude                # let the agent run a dev server on 3000
+kennel --no-network -- python untrusted.py     # no network at all
+kennel --net ports claude                      # old mode: ports 443 and 80 on any host
 kennel --env GITHUB_TOKEN claude               # pass an extra environment variable
 ```
+
+When the agent exits, kennel lists the connections it blocked. If something you need was blocked, add the domain. The full log is in `~/.cache/kennel/log/`.
 
 Run it from the project directory. kennel gives read-write access to the current directory. If the current directory is `$HOME` it refuses to start.
 
@@ -67,6 +75,8 @@ read = ["~/.myagent/config"]
 read_write = ["~/.myagent/state"]
 
 [net]
+mode = "proxy"                  # proxy | ports | none | open
+allow_domains = ["api.myagent.dev", "*.myagent.dev"]
 tcp_connect = [443]
 
 [env]
@@ -77,14 +87,15 @@ A file in `~/.config/kennel/profiles/<name>.toml` overrides the built-in profile
 
 ## Threat model
 
-kennel stops an agent from reading or writing outside the allowed paths and from opening TCP connections on other ports. This applies to its child processes too.
+kennel stops an agent from reading or writing outside the allowed paths and from reaching any host that isn't on the domain list. This applies to its child processes too.
 
 It does not stop:
 
-- exfiltration over an allowed port. If a secret is inside the project directory and 443 is open, the agent can still send it out.
-- UDP and DNS. Landlock doesn't restrict UDP.
+- exfiltration to an allowed domain. If the agent can push to GitHub, it can push a secret from the project to a repo it controls. Keep the domain list short.
 - anything over unix sockets when you pass `--allow-unix`. The D-Bus session bus then lets the agent run commands outside the sandbox with `systemd-run --user`, and if you are in the `docker` group the agent effectively has root.
-- writes to `.git/hooks` and `.git/config` in the project. A hook the agent plants runs outside kennel the next time you commit.
+- files in the project that run later, like `Makefile`, `package.json` scripts or `.envrc`. Read the diff before you run them. Git hooks are handled because they don't show up in `git status`.
+- a git hook you run yourself while the agent is still working. The check happens when the agent exits.
+- `--net ports` mode allows 443 and 80 on every host, plus UDP and DNS.
 
 Kernel exploits are out of scope, and so is code you later run outside kennel.
 
@@ -92,7 +103,16 @@ If the workload is hostile on purpose, use a VM.
 
 ## How it works
 
-It's about 600 lines of Rust. `policy.rs` resolves the profile chain and the optional `.kennel.toml`. `sandbox.rs` opens each allowed path, builds the Landlock ruleset and calls `restrict_self()`. `seccomp.rs` installs the unix socket filter. `main.rs` then calls `exec` on the agent. There is no daemon, proxy or `LD_PRELOAD`.
+It's about 1700 lines of Rust and no dependencies beyond `landlock`, `libc`, `clap` and `toml`.
+
+- `policy.rs` resolves the profile chain and the optional `.kennel.toml`.
+- `sandbox.rs` builds the Landlock ruleset and calls `restrict_self()` in the child.
+- `seccomp.rs` builds the seccomp filter: no unix sockets, only TCP sockets, and `connect()` goes to the supervisor through seccomp user notification.
+- `notify.rs` is the supervisor's side. For each `connect()` it reads the address, and if it's the proxy or an allowed local port it makes the connection itself and puts the socket into the agent's fd table with `SECCOMP_IOCTL_NOTIF_ADDFD`. The agent's own call never runs, so changing the address after the check gets it nothing.
+- `proxy.rs` is the HTTP CONNECT proxy with the domain allowlist.
+- `gitguard.rs` snapshots and restores git hooks and config.
+
+The cost is about 4 ms at startup and about 80 µs per new connection. File and CPU work run at native speed apart from the seccomp entry cost, which is a few percent at most.
 
 `tests/smoke.sh` checks the enforcement end to end. Build first with `cargo build`.
 
