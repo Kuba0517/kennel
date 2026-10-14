@@ -2,11 +2,11 @@ use crate::policy::Policy;
 use anyhow::{bail, Context, Result};
 use landlock::{
     Access, AccessFs, AccessNet, BitFlags, NetPort, PathBeneath, PathFd, Ruleset, RulesetAttr,
-    RulesetCreatedAttr, RulesetStatus, ABI,
+    RulesetCreatedAttr, RulesetStatus, Scope, ABI,
 };
 use std::path::Path;
 
-const LATEST_ABI: ABI = ABI::V5;
+const LATEST_ABI: ABI = ABI::V6;
 
 pub struct EnforcementReport {
     pub fully_enforced: bool,
@@ -23,6 +23,9 @@ pub fn enforce(policy: &Policy, verbose: bool) -> Result<EnforcementReport> {
     ruleset_ref
         .handle_access(handled_fs)
         .context("handling filesystem access")?;
+    ruleset_ref
+        .scope(Scope::AbstractUnixSocket | Scope::Signal)
+        .context("scoping signals and abstract sockets")?;
 
     let restrict_net = !policy.net_allow_all;
     if restrict_net {
