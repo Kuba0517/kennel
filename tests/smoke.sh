@@ -36,6 +36,10 @@ check "closes inherited fds"             nonzero bash -c "exec 9</etc/hostname; 
 check "blocks signals to outside"        nonzero bash -c "sleep 30 & p=\$!; \"$KENNEL\" -- kill -0 \$p; r=\$?; kill \$p; exit \$r"
 check "blocks writing to /tmp"           nonzero "$KENNEL" -- touch /tmp/kennel-pwned
 check "TMPDIR is writable"               0       "$KENNEL" -- bash -c 'touch "$TMPDIR/x"'
+check "blocks unix sockets"              nonzero "$KENNEL" -- python3 -c 'import socket; socket.socket(socket.AF_UNIX)'
+check "allows socketpair"                0       "$KENNEL" -- python3 -c 'import socket; socket.socketpair()'
+check "blocks io_uring"                  nonzero "$KENNEL" -- python3 -c 'import ctypes; b=ctypes.create_string_buffer(120); exit(ctypes.CDLL(None).syscall(425, 1, b) < 0)'
+check "--allow-unix allows unix sockets" 0       "$KENNEL" --allow-unix -- python3 -c 'import socket; socket.socket(socket.AF_UNIX)'
 printf '[fs]\nread_write = ["~"]\n' > .kennel.toml
 check "refuses unapproved .kennel.toml"  nonzero "$KENNEL" -- true
 rm .kennel.toml
