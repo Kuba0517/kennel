@@ -1,5 +1,7 @@
 mod gitguard;
+mod notify;
 mod policy;
+mod proxy;
 mod sandbox;
 mod seccomp;
 mod supervisor;
@@ -7,7 +9,9 @@ mod supervisor;
 use anyhow::{bail, Context, Result};
 use clap::Parser;
 use policy::NetMode;
+use std::os::fd::AsRawFd;
 use std::os::unix::fs::DirBuilderExt;
+use std::os::unix::net::UnixStream;
 use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -161,13 +165,53 @@ fn main() -> Result<()> {
     }
 
     let git = gitguard::snapshot(&cwd);
+    let proxy = match pol.net_mode {
+        NetMode::Proxy => Some(proxy::bind().context("starting proxy")?),
+        _ => None,
+    };
+    let proxy_port = proxy.as_ref().map(|l| l.local_addr().unwrap().port());
+    let (parent_sock, child_sock) = UnixStream::pair().context("creating socketpair")?;
+
     let pid = supervisor::fork()?;
     if pid == 0 {
-        let err = run_agent(&args, &pol, &tmp);
+        drop(parent_sock);
+        let err = run_agent(&args, &pol, &tmp, proxy_port, &child_sock);
         eprintln!("kennel: {err:#}");
         unsafe { libc::_exit(126) };
     }
+    drop(child_sock);
+
+    let log = proxy.map(|listener| {
+        let dir = home.join(".cache/kennel/log");
+        let _ = std::fs::create_dir_all(&dir);
+        let path = dir.join(format!("{}.log", policy::path_id(&cwd)));
+        let log = proxy::serve(listener, &pol.allow_domains, &pol.tcp_connect, path);
+        if let Some(fd) = notify::recv_fd(parent_sock.as_raw_fd()) {
+            let mut local_ports = pol.tcp_connect.clone();
+            local_ports.extend(&pol.tcp_bind);
+            let targets = notify::Targets {
+                proxy_port: proxy_port.unwrap(),
+                local_ports,
+            };
+            notify::serve(fd, targets, log.clone());
+        }
+        log
+    });
+
     let code = supervisor::wait(pid)?;
+    if let Some(log) = log {
+        let blocked = log.blocked();
+        if !blocked.is_empty() {
+            eprintln!("kennel: blocked network connections:");
+            for (target, n) in &blocked {
+                eprintln!("  {target} ({n}x)");
+            }
+            eprintln!(
+                "kennel: allow with --allow-domain (or allow_domains in .kennel.toml) or --allow-port; log in {}",
+                log.path().display()
+            );
+        }
+    }
     if let Some(git) = git {
         let stamp = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -192,7 +236,13 @@ fn main() -> Result<()> {
     std::process::exit(code);
 }
 
-fn run_agent(args: &Args, pol: &policy::Policy, tmp: &Path) -> anyhow::Error {
+fn run_agent(
+    args: &Args,
+    pol: &policy::Policy,
+    tmp: &Path,
+    proxy_port: Option<u16>,
+    sock: &UnixStream,
+) -> anyhow::Error {
     let report = match sandbox::enforce(pol, args.verbose) {
         Ok(r) => r,
         Err(e) => return e,
@@ -203,9 +253,15 @@ fn run_agent(args: &Args, pol: &policy::Policy, tmp: &Path) -> anyhow::Error {
              (older Landlock ABI); enforcement is partial"
         );
     }
-    if !pol.allow_unix {
-        if let Err(e) = seccomp::deny_unix_sockets() {
-            return e;
+    if !pol.allow_unix || proxy_port.is_some() {
+        match seccomp::install(!pol.allow_unix, proxy_port.is_some()) {
+            Ok(Some(listener)) => {
+                if let Err(e) = notify::send_fd(sock.as_raw_fd(), listener) {
+                    return anyhow::Error::new(e).context("passing seccomp listener");
+                }
+            }
+            Ok(None) => {}
+            Err(e) => return e,
         }
     }
     if args.verbose {
@@ -220,12 +276,22 @@ fn run_agent(args: &Args, pol: &policy::Policy, tmp: &Path) -> anyhow::Error {
         k.to_str()
             .is_some_and(|k| policy::env_allowed(k, &pol.env_pass))
     });
-    let err = Command::new(program)
-        .args(&args.command[1..])
+    let mut cmd = Command::new(program);
+    cmd.args(&args.command[1..])
         .env_clear()
         .envs(env)
-        .env("TMPDIR", tmp)
-        .exec();
+        .env("TMPDIR", tmp);
+    if let Some(port) = proxy_port {
+        let url = format!("http://127.0.0.1:{port}");
+        for var in ["HTTPS_PROXY", "HTTP_PROXY", "https_proxy", "http_proxy"] {
+            cmd.env(var, &url);
+        }
+        for var in ["NO_PROXY", "no_proxy"] {
+            cmd.env(var, "localhost,127.0.0.1,::1");
+        }
+        cmd.env("NODE_USE_ENV_PROXY", "1");
+    }
+    let err = cmd.exec();
     anyhow::Error::new(err).context(format!("failed to exec '{program}'"))
 }
 
