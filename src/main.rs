@@ -1,6 +1,7 @@
 mod policy;
 mod sandbox;
 mod seccomp;
+mod supervisor;
 
 use anyhow::{bail, Context, Result};
 use clap::Parser;
@@ -142,7 +143,21 @@ fn main() -> Result<()> {
         return Ok(());
     }
 
-    let report = sandbox::enforce(&pol, args.verbose)?;
+    let pid = supervisor::fork()?;
+    if pid == 0 {
+        let err = run_agent(&args, &pol, &tmp);
+        eprintln!("kennel: {err:#}");
+        unsafe { libc::_exit(126) };
+    }
+    let code = supervisor::wait(pid)?;
+    std::process::exit(code);
+}
+
+fn run_agent(args: &Args, pol: &policy::Policy, tmp: &Path) -> anyhow::Error {
+    let report = match sandbox::enforce(pol, args.verbose) {
+        Ok(r) => r,
+        Err(e) => return e,
+    };
     if !report.fully_enforced {
         eprintln!(
             "kennel: warning: kernel supports only part of the policy \
@@ -150,7 +165,9 @@ fn main() -> Result<()> {
         );
     }
     if !pol.allow_unix {
-        seccomp::deny_unix_sockets()?;
+        if let Err(e) = seccomp::deny_unix_sockets() {
+            return e;
+        }
     }
     if args.verbose {
         for skipped in &report.skipped_paths {
@@ -159,6 +176,7 @@ fn main() -> Result<()> {
     }
 
     close_inherited_fds();
+    let program = &args.command[0];
     let env = std::env::vars_os().filter(|(k, _)| {
         k.to_str()
             .is_some_and(|k| policy::env_allowed(k, &pol.env_pass))
@@ -167,9 +185,9 @@ fn main() -> Result<()> {
         .args(&args.command[1..])
         .env_clear()
         .envs(env)
-        .env("TMPDIR", &tmp)
+        .env("TMPDIR", tmp)
         .exec();
-    Err(err).with_context(|| format!("failed to exec '{program}'"))
+    anyhow::Error::new(err).context(format!("failed to exec '{program}'"))
 }
 
 // /tmp is shared with everything else on the machine, so each project gets its own.
