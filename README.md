@@ -92,7 +92,7 @@ A file in `~/.config/kennel/profiles/<name>.toml` with the name of a built-in pr
 ```toml
 # ~/.config/kennel/profiles/claude.toml
 [net]
-allow_domains = ["api.greptile.com", "mcp.sanity.io"]
+allow_domains = ["mcp.example.com"]
 ```
 
 Any other name defines a new profile. A `.kennel.toml` in the project directory is merged on top, so a repo can add the paths it needs. Since that file can loosen the sandbox, kennel refuses to start until you approve it with `kennel --trust`, and again whenever it changes. The approved copy is kept in `~/.config/kennel/trusted/`, which the agent can't write. Paths that don't exist on the machine are skipped, because the built-in profiles list several install locations.
