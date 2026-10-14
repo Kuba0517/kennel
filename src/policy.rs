@@ -48,6 +48,10 @@ pub struct NetSection {
     pub mode: Option<NetMode>,
     #[serde(default)]
     pub allow_domains: Vec<String>,
+    /// Domains for tools the user connected to the agent, dropped by --strict.
+    #[serde(default)]
+    pub connector_domains: Vec<String>,
+    pub strict: Option<bool>,
 }
 
 #[derive(Debug, Deserialize, Clone, Copy, PartialEq, Default, clap::ValueEnum)]
@@ -80,6 +84,8 @@ pub struct Policy {
     pub tcp_bind: Vec<u16>,
     pub net_mode: NetMode,
     pub allow_domains: Vec<String>,
+    pub connector_domains: Vec<String>,
+    pub strict: bool,
     pub allow_unix: bool,
     pub env_pass: Vec<String>,
     pub sources: Vec<String>,
@@ -190,6 +196,12 @@ fn apply_profile(profile: ProfileFile, home: &Path, policy: &mut Policy) {
         policy.net_mode = mode;
     }
     policy.allow_domains.extend(profile.net.allow_domains);
+    policy
+        .connector_domains
+        .extend(profile.net.connector_domains);
+    if let Some(strict) = profile.net.strict {
+        policy.strict = strict;
+    }
     if profile.net.allow_unix {
         policy.allow_unix = true;
     }

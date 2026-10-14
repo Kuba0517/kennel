@@ -60,6 +60,11 @@ struct Args {
     #[arg(long)]
     allow_unix: bool,
 
+    /// Block tools you connected to the agent, like claude.ai connectors.
+    /// Use it with --dangerously-skip-permissions.
+    #[arg(long)]
+    strict: bool,
+
     /// Same as --net none.
     #[arg(long)]
     no_network: bool,
@@ -134,6 +139,13 @@ fn main() -> Result<()> {
     pol.env_pass.extend(args.env.iter().cloned());
     if let Some(mode) = args.net {
         pol.net_mode = mode;
+    }
+    if args.strict {
+        pol.strict = true;
+    }
+    if !pol.strict {
+        let connectors = pol.connector_domains.clone();
+        pol.allow_domains.extend(connectors);
     }
     if args.no_network {
         pol.net_mode = NetMode::None;
@@ -355,6 +367,9 @@ fn print_policy(pol: &policy::Policy, profile_name: &str) {
             );
             for d in &pol.allow_domains {
                 println!("    {d}");
+            }
+            if pol.strict && !pol.connector_domains.is_empty() {
+                println!("  strict: blocking {}", pol.connector_domains.join(" "));
             }
             println!("  tcp bind:    {:?}", pol.tcp_bind);
             println!("  no UDP, no DNS, no direct connections except localhost on allowed ports");
