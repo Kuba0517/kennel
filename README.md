@@ -28,8 +28,10 @@ kennel also:
 With that in place I run agents in full-auto mode:
 
 ```bash
-kennel claude --dangerously-skip-permissions
+kennel --strict claude --dangerously-skip-permissions
 ```
+
+`--strict` also blocks the tools you connected to the agent yourself, like claude.ai connectors (Gmail, Drive, Calendar). Without it they work, since you chose to connect them. But with permission prompts off, a prompt injection could use them to send data out, and kennel can't see what goes through them.
 
 ## Install
 
@@ -54,6 +56,7 @@ kennel --allow-domain pypi.org claude          # let the proxy reach another dom
 kennel --allow-port 5432 claude                # let the agent reach local postgres
 kennel --allow-bind 3000 claude                # let the agent run a dev server on 3000
 kennel --no-network -- python untrusted.py     # no network at all
+kennel --strict claude                         # also block claude.ai connectors
 kennel --net ports claude                      # old mode: ports 443 and 80 on any host
 kennel --env GITHUB_TOKEN claude               # pass an extra environment variable
 ```
@@ -77,13 +80,22 @@ read_write = ["~/.myagent/state"]
 [net]
 mode = "proxy"                  # proxy | ports | none | open
 allow_domains = ["api.myagent.dev", "*.myagent.dev"]
+connector_domains = ["mcp.myagent.dev"]   # dropped by --strict
 tcp_connect = [443]
 
 [env]
 pass = ["MYAGENT_*"]
 ```
 
-A file in `~/.config/kennel/profiles/<name>.toml` overrides the built-in profile with the same name. A `.kennel.toml` in the project directory is merged on top, so a repo can add the paths it needs. Since that file can loosen the sandbox, kennel refuses to start until you approve it with `kennel --trust`, and again whenever it changes. The approved copy is kept in `~/.config/kennel/trusted/`, which the agent can't write. Paths that don't exist on the machine are skipped, because the built-in profiles list several install locations.
+A file in `~/.config/kennel/profiles/<name>.toml` with the name of a built-in profile adds to it. That's the place for MCP servers you always use:
+
+```toml
+# ~/.config/kennel/profiles/claude.toml
+[net]
+allow_domains = ["api.greptile.com", "mcp.sanity.io"]
+```
+
+Any other name defines a new profile. A `.kennel.toml` in the project directory is merged on top, so a repo can add the paths it needs. Since that file can loosen the sandbox, kennel refuses to start until you approve it with `kennel --trust`, and again whenever it changes. The approved copy is kept in `~/.config/kennel/trusted/`, which the agent can't write. Paths that don't exist on the machine are skipped, because the built-in profiles list several install locations.
 
 ## Threat model
 
@@ -92,6 +104,7 @@ kennel stops an agent from reading or writing outside the allowed paths and from
 It does not stop:
 
 - exfiltration to an allowed domain. If the agent can push to GitHub, it can push a secret from the project to a repo it controls. Keep the domain list short.
+- exfiltration through claude.ai connectors unless you pass `--strict`.
 - anything over unix sockets when you pass `--allow-unix`. The D-Bus session bus then lets the agent run commands outside the sandbox with `systemd-run --user`, and if you are in the `docker` group the agent effectively has root.
 - files in the project that run later, like `Makefile`, `package.json` scripts or `.envrc`. Read the diff before you run them. Git hooks are handled because they don't show up in `git status`.
 - a git hook you run yourself while the agent is still working. The check happens when the agent exits.
