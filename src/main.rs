@@ -134,8 +134,23 @@ fn main() -> Result<()> {
         }
     }
 
+    close_inherited_fds();
     let err = Command::new(program).args(&args.command[1..]).exec();
     Err(err).with_context(|| format!("failed to exec '{program}'"))
+}
+
+// Open fds survive exec and Landlock only checks access at open time, so a
+// descriptor the parent leaked would bypass the policy.
+fn close_inherited_fds() {
+    const CLOSE_RANGE_CLOEXEC: libc::c_uint = 1 << 2;
+    unsafe {
+        libc::syscall(
+            libc::SYS_close_range,
+            3 as libc::c_uint,
+            libc::c_uint::MAX,
+            CLOSE_RANGE_CLOEXEC,
+        );
+    }
 }
 
 fn print_policy(pol: &policy::Policy, profile_name: &str) {

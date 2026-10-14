@@ -69,7 +69,8 @@ fn expand(raw: &str, home: &Path) -> PathBuf {
 }
 
 fn user_profile_path(name: &str, home: &Path) -> PathBuf {
-    home.join(".config/kennel/profiles").join(format!("{name}.toml"))
+    home.join(".config/kennel/profiles")
+        .join(format!("{name}.toml"))
 }
 
 fn load_profile_source(name: &str, home: &Path) -> Result<String> {
