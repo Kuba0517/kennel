@@ -26,9 +26,19 @@ check "writes file in cwd"               0       "$KENNEL" -- touch created.txt
 check "blocks reading ~/.ssh"            nonzero "$KENNEL" -- ls "$HOME/.ssh"
 check "blocks writing to \$HOME"         nonzero "$KENNEL" -- touch "$HOME/kennel-pwned"
 check "blocks reading other dirs in ~"   nonzero "$KENNEL" -- ls "$HOME/Documents"
-check "allows TCP 443"                   0       "$KENNEL" -- curl -s --max-time 10 https://example.com
-check "blocks TCP on random port"        nonzero "$KENNEL" -- curl -s --max-time 5 http://example.com:8080
+check "proxy allows a listed domain"     0       "$KENNEL" --allow-domain example.com -- curl -sf --max-time 10 https://example.com
+check "proxy blocks other domains"       nonzero "$KENNEL" --allow-domain example.com -- curl -sf --max-time 10 https://example.org
+check "proxy blocks other ports"         nonzero "$KENNEL" --allow-domain example.com -- curl -sf --max-time 5 http://example.com:8080
+check "blocks connections around proxy"  nonzero "$KENNEL" -- python3 -c 'import socket; socket.create_connection(("1.1.1.1", 443), 5)'
+check "blocks UDP"                       nonzero "$KENNEL" -- python3 -c 'import socket; socket.socket(socket.AF_INET, socket.SOCK_DGRAM)'
+check "blocks DNS"                       nonzero "$KENNEL" -- getent hosts example.com
+check "--net ports allows TCP 443"       0       "$KENNEL" --net ports -- curl -s --max-time 10 https://example.com
+check "--net ports blocks other ports"   nonzero "$KENNEL" --net ports -- curl -s --max-time 5 http://example.com:8080
 check "--no-network blocks TCP 443"      nonzero "$KENNEL" --no-network -- curl -s --max-time 5 https://example.com
+check "--allow-bind runs a dev server"   0       "$KENNEL" --allow-bind 8765 -- bash -c 'cd "$TMPDIR"; python3 -m http.server 8765 --bind 127.0.0.1 >/dev/null 2>&1 & s=$!; sleep 1; curl -sf -o /dev/null http://localhost:8765/; r=$?; kill $s; exit $r'
+git init -q .
+check "undoes a planted git hook"        nonzero bash -c "\"$KENNEL\" -- bash -c 'echo evil > .git/hooks/pre-commit' 2>/dev/null; [ -e .git/hooks/pre-commit ]"
+check "undoes core.hooksPath"            nonzero bash -c "\"$KENNEL\" -- git config core.hooksPath /tmp/x 2>/dev/null; git config --get core.hooksPath"
 check "child processes stay confined"    nonzero "$KENNEL" -- bash -c "cat $HOME/.ssh/* 2>/dev/null || exit 1"
 check "drops secrets from the environment" nonzero env KENNEL_TEST_SECRET=x "$KENNEL" -- bash -c '[ -n "${KENNEL_TEST_SECRET:-}" ]'
 check "--env passes a variable through"  0       env KENNEL_TEST_SECRET=x "$KENNEL" --env KENNEL_TEST_SECRET -- bash -c '[ -n "${KENNEL_TEST_SECRET:-}" ]'
