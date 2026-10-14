@@ -20,6 +20,7 @@ Before the exec, kennel also:
 - closes inherited file descriptors
 - blocks signals and abstract unix sockets to processes outside the sandbox
 - points `TMPDIR` at a private directory per project and denies `/tmp`
+- blocks creating unix sockets with a seccomp filter, so the agent can't reach the ssh-agent, the D-Bus session bus or `/var/run/docker.sock`. `socketpair()` still works. Pass `--allow-unix` (or set `allow_unix = true` under `[net]`) for agents that need local sockets.
 
 With that in place I run agents in full-auto mode:
 
@@ -82,7 +83,7 @@ It does not stop:
 
 - exfiltration over an allowed port. If a secret is inside the project directory and 443 is open, the agent can still send it out.
 - UDP and DNS. Landlock doesn't restrict UDP.
-- connecting to unix sockets by path, such as the ssh-agent, D-Bus or `/var/run/docker.sock`. Landlock only covers this from ABI v9 (Linux 7.1). Until then, the D-Bus session bus lets the agent run commands outside the sandbox with `systemd-run --user`, and if you are in the `docker` group the agent effectively has root.
+- anything over unix sockets when you pass `--allow-unix`. The D-Bus session bus then lets the agent run commands outside the sandbox with `systemd-run --user`, and if you are in the `docker` group the agent effectively has root.
 - writes to `.git/hooks` and `.git/config` in the project. A hook the agent plants runs outside kennel the next time you commit.
 
 Kernel exploits are out of scope, and so is code you later run outside kennel.
@@ -91,7 +92,7 @@ If the workload is hostile on purpose, use a VM.
 
 ## How it works
 
-It's about 530 lines of Rust. `policy.rs` resolves the profile chain and the optional `.kennel.toml`. `sandbox.rs` opens each allowed path, builds the Landlock ruleset and calls `restrict_self()`. `main.rs` then calls `exec` on the agent. There is no daemon, proxy or `LD_PRELOAD`.
+It's about 600 lines of Rust. `policy.rs` resolves the profile chain and the optional `.kennel.toml`. `sandbox.rs` opens each allowed path, builds the Landlock ruleset and calls `restrict_self()`. `seccomp.rs` installs the unix socket filter. `main.rs` then calls `exec` on the agent. There is no daemon, proxy or `LD_PRELOAD`.
 
 `tests/smoke.sh` checks the enforcement end to end. Build first with `cargo build`.
 
