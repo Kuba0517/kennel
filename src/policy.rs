@@ -43,6 +43,8 @@ pub struct NetSection {
     pub tcp_bind: Vec<u16>,
     #[serde(default)]
     pub allow_all: bool,
+    #[serde(default)]
+    pub allow_unix: bool,
 }
 
 #[derive(Debug, Deserialize, Default)]
@@ -60,6 +62,7 @@ pub struct Policy {
     pub tcp_connect: Vec<u16>,
     pub tcp_bind: Vec<u16>,
     pub net_allow_all: bool,
+    pub allow_unix: bool,
     pub env_pass: Vec<String>,
     pub sources: Vec<String>,
 }
@@ -143,6 +146,9 @@ fn apply_profile(profile: ProfileFile, home: &Path, policy: &mut Policy) {
     policy.tcp_bind.extend(&profile.net.tcp_bind);
     if profile.net.allow_all {
         policy.net_allow_all = true;
+    }
+    if profile.net.allow_unix {
+        policy.allow_unix = true;
     }
     policy.env_pass.extend(profile.env.pass);
 }

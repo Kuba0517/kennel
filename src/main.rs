@@ -1,5 +1,6 @@
 mod policy;
 mod sandbox;
+mod seccomp;
 
 use anyhow::{bail, Context, Result};
 use clap::Parser;
@@ -33,6 +34,10 @@ struct Args {
     /// Extra environment variables to pass through (repeatable, `PREFIX*` allowed).
     #[arg(long = "env", value_name = "NAME")]
     env: Vec<String>,
+
+    /// Allow unix sockets (ssh-agent, D-Bus, docker.sock). Only for trusted agents.
+    #[arg(long)]
+    allow_unix: bool,
 
     /// Block all TCP connections, overriding the profile.
     #[arg(long)]
@@ -109,6 +114,9 @@ fn main() -> Result<()> {
         pol.tcp_connect.clear();
         pol.tcp_bind.clear();
     }
+    if args.allow_unix {
+        pol.allow_unix = true;
+    }
     if args.no_cwd {
         pol.cwd_rw = false;
     }
@@ -140,6 +148,9 @@ fn main() -> Result<()> {
             "kennel: warning: kernel supports only part of the policy \
              (older Landlock ABI); enforcement is partial"
         );
+    }
+    if !pol.allow_unix {
+        seccomp::deny_unix_sockets()?;
     }
     if args.verbose {
         for skipped in &report.skipped_paths {
@@ -206,6 +217,11 @@ fn print_policy(pol: &policy::Policy, profile_name: &str) {
         println!("  tcp connect: {:?}", pol.tcp_connect);
         println!("  tcp bind:    {:?}", pol.tcp_bind);
         println!("  (all other TCP denied; UDP/ICMP not restricted by Landlock)");
+    }
+    if pol.allow_unix {
+        println!("  unix sockets: allowed");
+    } else {
+        println!("  unix sockets: denied (socketpair allowed)");
     }
     println!("\nenvironment passed through:");
     println!("  {}", pol.env_pass.join(" "));
