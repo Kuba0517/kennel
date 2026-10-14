@@ -139,7 +139,11 @@ fn merge_profile_chain(
     if !seen.insert(name.to_string()) {
         bail!("profile inheritance cycle involving '{name}'");
     }
-    let source = load_profile_source(name, home)?;
+    let builtin = BUILTIN_PROFILES.iter().find(|(n, _)| *n == name);
+    let source = match builtin {
+        Some((_, body)) => (*body).to_string(),
+        None => load_profile_source(name, home)?,
+    };
     let parsed: ProfileFile =
         toml::from_str(&source).with_context(|| format!("parsing profile '{name}'"))?;
     if let Some(parent) = &parsed.extends {
@@ -147,6 +151,23 @@ fn merge_profile_chain(
     }
     apply_profile(parsed, home, policy);
     policy.sources.push(name.to_string());
+
+    // A user file with a built-in's name adds to it rather than replacing it.
+    let user = user_profile_path(name, home);
+    if builtin.is_some() && user.is_file() {
+        let source = std::fs::read_to_string(&user)
+            .with_context(|| format!("reading {}", user.display()))?;
+        let parsed: ProfileFile =
+            toml::from_str(&source).with_context(|| format!("parsing {}", user.display()))?;
+        if parsed.extends.is_some() {
+            bail!(
+                "{} adds to the built-in '{name}' profile; remove 'extends'",
+                user.display()
+            );
+        }
+        apply_profile(parsed, home, policy);
+        policy.sources.push(user.display().to_string());
+    }
     Ok(())
 }
 
