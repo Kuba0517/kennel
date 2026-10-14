@@ -225,7 +225,9 @@ fn main() -> Result<()> {
                 eprintln!("  {target} ({n}x)");
             }
             eprintln!(
-                "kennel: allow with --allow-domain (or allow_domains in .kennel.toml) or --allow-port; log in {}",
+                "kennel: to allow a domain, use --allow-domain once, allow_domains in \
+                 .kennel.toml for this project, or in ~/.config/kennel/profiles/{profile_name}.toml \
+                 for every project. Log: {}",
                 log.path().display()
             );
         }
