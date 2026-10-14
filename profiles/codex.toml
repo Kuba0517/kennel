@@ -1,0 +1,17 @@
+extends = "base"
+
+[fs]
+read = [
+    "~/.local/bin",
+    "~/.nvm/versions",
+    "~/.gitconfig",
+    "~/.config/git",
+]
+read_write = [
+    "~/.codex",
+    "~/.cache/codex",
+]
+
+[net]
+tcp_connect = [443, 80]
+tcp_bind = []

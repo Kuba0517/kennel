@@ -1,0 +1,23 @@
+extends = "base"
+
+[fs]
+read = [
+    "~/.local/bin",
+    "~/.local/share/claude",
+    "~/.nvm/versions",
+    "~/.gitconfig",
+    "~/.config/git",
+    "~/.claude.json",
+]
+read_write = [
+    "~/.claude",
+    "~/.claude.json",
+    "~/.claude.json.backup",
+    "~/.cache/claude-cli-nodejs",
+    "~/.local/state/claude",
+    "~/.config/claude",
+]
+
+[net]
+tcp_connect = [443, 80]
+tcp_bind = []

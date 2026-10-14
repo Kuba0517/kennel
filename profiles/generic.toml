@@ -1,0 +1,11 @@
+extends = "base"
+
+[fs]
+read = [
+    "~/.gitconfig",
+    "~/.config/git",
+]
+
+[net]
+tcp_connect = [443, 80]
+tcp_bind = []

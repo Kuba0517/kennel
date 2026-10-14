@@ -1,0 +1,29 @@
+[fs]
+read = [
+    "/usr",
+    "/bin",
+    "/sbin",
+    "/lib",
+    "/lib64",
+    "/etc",
+    "/opt",
+    "/run",
+    "/proc",
+    "/sys/fs/cgroup",
+]
+read_write = [
+    "/dev/null",
+    "/dev/zero",
+    "/dev/urandom",
+    "/dev/random",
+    "/dev/tty",
+    "/dev/ptmx",
+    "/dev/pts",
+    "/dev/shm",
+    "/tmp",
+    "/var/tmp",
+]
+
+[net]
+tcp_connect = []
+tcp_bind = []
