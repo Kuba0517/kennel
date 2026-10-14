@@ -45,6 +45,23 @@ pub struct NetSection {
     pub allow_all: bool,
     #[serde(default)]
     pub allow_unix: bool,
+    pub mode: Option<NetMode>,
+    #[serde(default)]
+    pub allow_domains: Vec<String>,
+}
+
+#[derive(Debug, Deserialize, Clone, Copy, PartialEq, Default, clap::ValueEnum)]
+#[serde(rename_all = "lowercase")]
+pub enum NetMode {
+    /// HTTPS through kennel's proxy to allowed domains only
+    #[default]
+    Proxy,
+    /// TCP to the allowed ports on any host
+    Ports,
+    /// No network
+    None,
+    /// No restriction
+    Open,
 }
 
 #[derive(Debug, Deserialize, Default)]
@@ -61,7 +78,8 @@ pub struct Policy {
     pub cwd_rw: bool,
     pub tcp_connect: Vec<u16>,
     pub tcp_bind: Vec<u16>,
-    pub net_allow_all: bool,
+    pub net_mode: NetMode,
+    pub allow_domains: Vec<String>,
     pub allow_unix: bool,
     pub env_pass: Vec<String>,
     pub sources: Vec<String>,
@@ -145,8 +163,12 @@ fn apply_profile(profile: ProfileFile, home: &Path, policy: &mut Policy) {
     policy.tcp_connect.extend(&profile.net.tcp_connect);
     policy.tcp_bind.extend(&profile.net.tcp_bind);
     if profile.net.allow_all {
-        policy.net_allow_all = true;
+        policy.net_mode = NetMode::Open;
     }
+    if let Some(mode) = profile.net.mode {
+        policy.net_mode = mode;
+    }
+    policy.allow_domains.extend(profile.net.allow_domains);
     if profile.net.allow_unix {
         policy.allow_unix = true;
     }

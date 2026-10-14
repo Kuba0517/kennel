@@ -6,6 +6,7 @@ mod supervisor;
 
 use anyhow::{bail, Context, Result};
 use clap::Parser;
+use policy::NetMode;
 use std::os::unix::fs::DirBuilderExt;
 use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
@@ -29,7 +30,16 @@ struct Args {
     #[arg(long = "rw", value_name = "PATH")]
     read_write: Vec<PathBuf>,
 
-    /// Extra allowed TCP connect ports (repeatable).
+    /// Network mode, overriding the profile.
+    #[arg(long, value_enum, value_name = "MODE")]
+    net: Option<NetMode>,
+
+    /// Extra domain the proxy may connect to (repeatable, `*.example.com` allowed).
+    #[arg(long = "allow-domain", value_name = "DOMAIN")]
+    allow_domains: Vec<String>,
+
+    /// Extra allowed TCP port (repeatable). In proxy mode this allows direct
+    /// connections to that port on localhost.
     #[arg(long = "allow-port", value_name = "PORT")]
     allow_ports: Vec<u16>,
 
@@ -41,7 +51,7 @@ struct Args {
     #[arg(long)]
     allow_unix: bool,
 
-    /// Block all TCP connections, overriding the profile.
+    /// Same as --net none.
     #[arg(long)]
     no_network: bool,
 
@@ -110,9 +120,15 @@ fn main() -> Result<()> {
     pol.read.extend(args.read_only.iter().cloned());
     pol.read_write.extend(args.read_write.iter().cloned());
     pol.tcp_connect.extend(&args.allow_ports);
+    pol.allow_domains.extend(args.allow_domains.iter().cloned());
     pol.env_pass.extend(args.env.iter().cloned());
+    if let Some(mode) = args.net {
+        pol.net_mode = mode;
+    }
     if args.no_network {
-        pol.net_allow_all = false;
+        pol.net_mode = NetMode::None;
+    }
+    if pol.net_mode == NetMode::None {
         pol.tcp_connect.clear();
         pol.tcp_bind.clear();
     }
@@ -252,12 +268,25 @@ fn print_policy(pol: &policy::Policy, profile_name: &str) {
         println!("  {}", p.display());
     }
     println!("\nnetwork:");
-    if pol.net_allow_all {
-        println!("  unrestricted");
-    } else {
-        println!("  tcp connect: {:?}", pol.tcp_connect);
-        println!("  tcp bind:    {:?}", pol.tcp_bind);
-        println!("  (all other TCP denied; UDP/ICMP not restricted by Landlock)");
+    match pol.net_mode {
+        NetMode::Open => println!("  unrestricted"),
+        NetMode::None => println!("  none"),
+        NetMode::Ports => {
+            println!("  tcp connect: {:?} on any host", pol.tcp_connect);
+            println!("  tcp bind:    {:?}", pol.tcp_bind);
+            println!("  (UDP and DNS not restricted)");
+        }
+        NetMode::Proxy => {
+            println!(
+                "  through kennel's proxy to ports {:?} on:",
+                pol.tcp_connect
+            );
+            for d in &pol.allow_domains {
+                println!("    {d}");
+            }
+            println!("  tcp bind:    {:?}", pol.tcp_bind);
+            println!("  no UDP, no DNS, no direct connections except localhost on allowed ports");
+        }
     }
     if pol.allow_unix {
         println!("  unix sockets: allowed");

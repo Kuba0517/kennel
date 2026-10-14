@@ -23,6 +23,8 @@ read_write = [
 ]
 
 [net]
+mode = "proxy"
+allow_domains = ["github.com", "api.github.com", "*.githubusercontent.com"]
 tcp_connect = []
 tcp_bind = []
 

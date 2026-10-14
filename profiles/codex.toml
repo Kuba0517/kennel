@@ -13,6 +13,7 @@ read_write = [
 ]
 
 [net]
+allow_domains = ["api.openai.com", "chatgpt.com", "auth.openai.com"]
 tcp_connect = [443, 80]
 tcp_bind = []
 

@@ -1,4 +1,4 @@
-use crate::policy::Policy;
+use crate::policy::{NetMode, Policy};
 use anyhow::{bail, Context, Result};
 use landlock::{
     Access, AccessFs, AccessNet, BitFlags, NetPort, PathBeneath, PathFd, Ruleset, RulesetAttr,
@@ -27,7 +27,7 @@ pub fn enforce(policy: &Policy, verbose: bool) -> Result<EnforcementReport> {
         .scope(Scope::AbstractUnixSocket | Scope::Signal)
         .context("scoping signals and abstract sockets")?;
 
-    let restrict_net = !policy.net_allow_all;
+    let restrict_net = policy.net_mode != NetMode::Open;
     if restrict_net {
         ruleset_ref
             .handle_access(AccessNet::BindTcp | AccessNet::ConnectTcp)
@@ -57,12 +57,16 @@ pub fn enforce(policy: &Policy, verbose: bool) -> Result<EnforcementReport> {
         }
     }
 
-    if restrict_net {
+    // In proxy mode connect() is handled by the supervisor, so Landlock
+    // allows no direct TCP connections at all.
+    if policy.net_mode == NetMode::Ports {
         for port in &policy.tcp_connect {
             created = created
                 .add_rule(NetPort::new(*port, AccessNet::ConnectTcp))
                 .with_context(|| format!("allowing TCP connect to port {port}"))?;
         }
+    }
+    if restrict_net && policy.net_mode != NetMode::None {
         for port in &policy.tcp_bind {
             created = created
                 .add_rule(NetPort::new(*port, AccessNet::BindTcp))
