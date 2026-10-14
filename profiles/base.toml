@@ -20,8 +20,6 @@ read_write = [
     "/dev/ptmx",
     "/dev/pts",
     "/dev/shm",
-    "/tmp",
-    "/var/tmp",
 ]
 
 [net]

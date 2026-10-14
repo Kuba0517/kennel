@@ -3,8 +3,11 @@ mod sandbox;
 
 use anyhow::{bail, Context, Result};
 use clap::Parser;
+use std::collections::hash_map::DefaultHasher;
+use std::hash::{Hash, Hasher};
+use std::os::unix::fs::DirBuilderExt;
 use std::os::unix::process::CommandExt;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 
 /// Landlock sandbox for AI coding agents.
@@ -121,6 +124,9 @@ fn main() -> Result<()> {
         pol.read_write.push(cwd.clone());
     }
 
+    let tmp = private_tmp(&home, &cwd)?;
+    pol.read_write.push(tmp.clone());
+
     if args.dry_run {
         print_policy(&pol, &profile_name);
         return Ok(());
@@ -148,8 +154,24 @@ fn main() -> Result<()> {
         .args(&args.command[1..])
         .env_clear()
         .envs(env)
+        .env("TMPDIR", &tmp)
         .exec();
     Err(err).with_context(|| format!("failed to exec '{program}'"))
+}
+
+// /tmp is shared with everything else on the machine, so each project gets its own.
+fn private_tmp(home: &Path, cwd: &Path) -> Result<PathBuf> {
+    let mut hasher = DefaultHasher::new();
+    cwd.hash(&mut hasher);
+    let dir = home
+        .join(".cache/kennel/tmp")
+        .join(format!("{:016x}", hasher.finish()));
+    std::fs::DirBuilder::new()
+        .recursive(true)
+        .mode(0o700)
+        .create(&dir)
+        .with_context(|| format!("creating {}", dir.display()))?;
+    Ok(dir)
 }
 
 // Open fds survive exec and Landlock only checks access at open time, so a
