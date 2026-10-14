@@ -47,6 +47,11 @@ struct Args {
     #[arg(long = "allow-port", value_name = "PORT")]
     allow_ports: Vec<u16>,
 
+    /// Port the agent may listen on, e.g. for a dev server (repeatable).
+    /// It may also connect to it on localhost.
+    #[arg(long = "allow-bind", value_name = "PORT")]
+    allow_binds: Vec<u16>,
+
     /// Extra environment variables to pass through (repeatable, `PREFIX*` allowed).
     #[arg(long = "env", value_name = "NAME")]
     env: Vec<String>,
@@ -124,6 +129,7 @@ fn main() -> Result<()> {
     pol.read.extend(args.read_only.iter().cloned());
     pol.read_write.extend(args.read_write.iter().cloned());
     pol.tcp_connect.extend(&args.allow_ports);
+    pol.tcp_bind.extend(&args.allow_binds);
     pol.allow_domains.extend(args.allow_domains.iter().cloned());
     pol.env_pass.extend(args.env.iter().cloned());
     if let Some(mode) = args.net {
