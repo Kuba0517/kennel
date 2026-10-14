@@ -18,6 +18,8 @@ pub struct ProfileFile {
     pub fs: FsSection,
     #[serde(default)]
     pub net: NetSection,
+    #[serde(default)]
+    pub env: EnvSection,
 }
 
 #[derive(Debug, Deserialize, Default)]
@@ -41,6 +43,13 @@ pub struct NetSection {
     pub allow_all: bool,
 }
 
+#[derive(Debug, Deserialize, Default)]
+#[serde(deny_unknown_fields)]
+pub struct EnvSection {
+    #[serde(default)]
+    pub pass: Vec<String>,
+}
+
 #[derive(Debug, Default)]
 pub struct Policy {
     pub read: Vec<PathBuf>,
@@ -49,6 +58,7 @@ pub struct Policy {
     pub tcp_connect: Vec<u16>,
     pub tcp_bind: Vec<u16>,
     pub net_allow_all: bool,
+    pub env_pass: Vec<String>,
     pub sources: Vec<String>,
 }
 
@@ -132,6 +142,15 @@ fn apply_profile(profile: ProfileFile, home: &Path, policy: &mut Policy) {
     if profile.net.allow_all {
         policy.net_allow_all = true;
     }
+    policy.env_pass.extend(profile.env.pass);
+}
+
+/// `NAME` matches exactly, `PREFIX*` matches by prefix.
+pub fn env_allowed(name: &str, patterns: &[String]) -> bool {
+    patterns.iter().any(|p| match p.strip_suffix('*') {
+        Some(prefix) => name.starts_with(prefix),
+        None => name == p,
+    })
 }
 
 pub fn resolve(profile_name: &str) -> Result<Policy> {

@@ -21,3 +21,6 @@ read_write = [
 [net]
 tcp_connect = [443, 80]
 tcp_bind = []
+
+[env]
+pass = ["ANTHROPIC_*", "CLAUDE_*"]

@@ -27,3 +27,13 @@ read_write = [
 [net]
 tcp_connect = []
 tcp_bind = []
+
+[env]
+pass = [
+    "PATH", "HOME", "USER", "LOGNAME", "SHELL",
+    "TERM", "COLORTERM", "TERM_PROGRAM", "NO_COLOR", "FORCE_COLOR",
+    "LANG", "LANGUAGE", "LC_*", "TZ",
+    "EDITOR", "VISUAL", "PAGER",
+    "XDG_CONFIG_HOME", "XDG_CACHE_HOME", "XDG_DATA_HOME", "XDG_STATE_HOME",
+    "HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY", "http_proxy", "https_proxy", "no_proxy",
+]

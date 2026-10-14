@@ -29,6 +29,10 @@ struct Args {
     #[arg(long = "allow-port", value_name = "PORT")]
     allow_ports: Vec<u16>,
 
+    /// Extra environment variables to pass through (repeatable, `PREFIX*` allowed).
+    #[arg(long = "env", value_name = "NAME")]
+    env: Vec<String>,
+
     /// Block all TCP connections, overriding the profile.
     #[arg(long)]
     no_network: bool,
@@ -94,6 +98,7 @@ fn main() -> Result<()> {
     pol.read.extend(args.read_only.iter().cloned());
     pol.read_write.extend(args.read_write.iter().cloned());
     pol.tcp_connect.extend(&args.allow_ports);
+    pol.env_pass.extend(args.env.iter().cloned());
     if args.no_network {
         pol.net_allow_all = false;
         pol.tcp_connect.clear();
@@ -135,7 +140,15 @@ fn main() -> Result<()> {
     }
 
     close_inherited_fds();
-    let err = Command::new(program).args(&args.command[1..]).exec();
+    let env = std::env::vars_os().filter(|(k, _)| {
+        k.to_str()
+            .is_some_and(|k| policy::env_allowed(k, &pol.env_pass))
+    });
+    let err = Command::new(program)
+        .args(&args.command[1..])
+        .env_clear()
+        .envs(env)
+        .exec();
     Err(err).with_context(|| format!("failed to exec '{program}'"))
 }
 
@@ -174,5 +187,7 @@ fn print_policy(pol: &policy::Policy, profile_name: &str) {
         println!("  tcp bind:    {:?}", pol.tcp_bind);
         println!("  (all other TCP denied; UDP/ICMP not restricted by Landlock)");
     }
+    println!("\nenvironment passed through:");
+    println!("  {}", pol.env_pass.join(" "));
     println!("\neverything not listed above is denied by the kernel.");
 }
